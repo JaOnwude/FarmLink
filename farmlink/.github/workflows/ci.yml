@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: farmlink
+          POSTGRES_PASSWORD: farmlink_test_password
+          POSTGRES_DB: farmlink_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U farmlink"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://farmlink:farmlink_test_password@localhost:5432/farmlink_test
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: ci-test-secret-not-for-production
+      PAYSTACK_SECRET_KEY: sk_test_ci_placeholder
+      PAYSTACK_PUBLIC_KEY: pk_test_ci_placeholder
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: pip install ruff && ruff check app tests
+
+      - name: Run tests
+        run: pytest -v
