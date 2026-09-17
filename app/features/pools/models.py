@@ -1,11 +1,39 @@
 """
 Pools feature - SQLAlchemy ORM models.
-Build target: Day 4
 
-Import Base from app.core.database, define the table(s) for this feature.
-Alembic's env.py imports every features/*/models.py module so autogenerate
-can see them - add the import there once this file has a real model.
+pools (product, price, total_qty, available_qty, status) - index(status)
+
+This is the row every order will SELECT ... FOR UPDATE in Day 5 - it's the
+single source of truth for what's left to sell. available_qty is the
+number that must never go below zero; total_qty is fixed at pool creation
+(or grows as contributions come in - see contributions feature) and is
+kept only for reporting/audit, never used in the availability check.
 """
-# from app.core.database import Base
+import enum
 
-# TODO (Day 4): define ORM model(s) here
+from sqlalchemy import Enum, Integer, Numeric, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.database import Base, TimestampMixin, UUIDPKMixin
+
+
+class PoolStatus(str, enum.Enum):
+    OPEN = "open"
+    CLOSED = "closed"
+
+
+class Pool(UUIDPKMixin, TimestampMixin, Base):
+    __tablename__ = "pools"
+
+    product: Mapped[str] = mapped_column(String(255), nullable=False)
+    price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    total_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    available_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[PoolStatus] = mapped_column(
+        Enum(PoolStatus, name="pool_status"), nullable=False, default=PoolStatus.OPEN, index=True
+    )
+
+    contributions: Mapped[list["Contribution"]] = relationship(back_populates="pool")
+    orders: Mapped[list["Order"]] = relationship(back_populates="pool")
+    allocations: Mapped[list["Allocation"]] = relationship(back_populates="pool")
+    payouts: Mapped[list["Payout"]] = relationship(back_populates="pool")

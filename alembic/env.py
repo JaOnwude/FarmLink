@@ -8,16 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.core.database import Base
-
-# Import every feature's models module here so Base.metadata is fully
-# populated before autogenerate compares it against the live database.
-# Add the import the day that feature's models.py gets real tables in it.
-# from app.features.auth import models as auth_models  # noqa: F401
-# from app.features.pools import models as pools_models  # noqa: F401
-# from app.features.contributions import models as contributions_models  # noqa: F401
-# from app.features.orders import models as orders_models  # noqa: F401
-# from app.features.payments import models as payments_models  # noqa: F401
-# from app.features.payouts import models as payouts_models  # noqa: F401
+import app.core.model_registry  # noqa: F401 - registers all feature models before autogenerate compares
 
 config = context.config
 if config.config_file_name is not None:
