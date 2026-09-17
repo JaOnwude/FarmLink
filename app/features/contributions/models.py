@@ -1,11 +1,27 @@
 """
 Contributions feature - SQLAlchemy ORM models.
-Build target: Day 4
 
-Import Base from app.core.database, define the table(s) for this feature.
-Alembic's env.py imports every features/*/models.py module so autogenerate
-can see them - add the import there once this file has a real model.
+contributions (pool, farmer, qty, at) - index(pool)
 """
-# from app.core.database import Base
+import uuid
 
-# TODO (Day 4): define ORM model(s) here
+from sqlalchemy import ForeignKey, Integer
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.database import Base, TimestampMixin, UUIDPKMixin
+
+
+class Contribution(UUIDPKMixin, TimestampMixin, Base):
+    __tablename__ = "contributions"
+
+    pool_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("pools.id"), nullable=False, index=True
+    )
+    farmer_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    qty: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    pool: Mapped["Pool"] = relationship(back_populates="contributions")
+    farmer: Mapped["User"] = relationship(back_populates="contributions")

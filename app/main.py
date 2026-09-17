@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
+import app.core.model_registry  # noqa: F401 - registers all ORM models, must run before any DB access
 from app.core.config import get_settings
 from app.core.logging_config import configure_logging
 from app.middleware.request_context import RequestContextMiddleware
