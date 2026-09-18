@@ -12,6 +12,7 @@ from app.middleware.request_context import RequestContextMiddleware
 from app.features.auth.router import router as auth_router
 from app.features.pools.router import router as pools_router
 from app.features.contributions.router import router as contributions_router
+from app.features.orders.router import router as orders_router
 
 settings = get_settings()
 
@@ -56,7 +57,7 @@ async def health():
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(pools_router, prefix=settings.api_v1_prefix)
 app.include_router(contributions_router, prefix=settings.api_v1_prefix)
-# from app.features.orders.router import router as orders_router
+app.include_router(orders_router, prefix=settings.api_v1_prefix)
 # from app.features.payments.router import router as payments_router
 # from app.features.payouts.router import router as payouts_router
 # from app.features.feed.router import router as feed_router
