@@ -52,7 +52,7 @@ def _auth_header(user: User) -> dict:
 async def _make_pool_with_stock(admin: User, farmer: User, client: AsyncClient, qty: int) -> str:
     pool_resp = await client.post(
         "/api/v1/pools",
-        json={"product": "Rice (50kg bags)", "price": "45000.00"},
+        json={"product": "Rice (50kg bags)", "price": "45000.00", "unit": "bag"},
         headers=_auth_header(admin),
     )
     pool_id = pool_resp.json()["id"]

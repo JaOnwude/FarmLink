@@ -13,6 +13,7 @@ from app.features.pools.models import PoolStatus
 class PoolCreate(BaseModel):
     product: str = Field(min_length=1, max_length=255)
     price: Decimal = Field(gt=0, decimal_places=2)
+    unit: str = Field(min_length=1, max_length=50, description='e.g. "bag", "basket", "tuber", "kg"')
     # total_qty/available_qty are NOT set here - a pool starts empty and
     # grows as farmers contribute (see contributions feature). Admin
     # declares what's being pooled and at what price; the co-op fills it.
@@ -22,6 +23,7 @@ class PoolOut(BaseModel):
     id: uuid.UUID
     product: str
     price: Decimal
+    unit: str
     total_qty: int
     available_qty: int
     status: PoolStatus

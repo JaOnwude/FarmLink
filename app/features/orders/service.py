@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.orders.models import Allocation, Order, OrderStatus
 from app.features.pools.models import Pool, PoolStatus
+from app.features.pools.service import invalidate_pool_cache
 
 
 class PoolNotFound(Exception):
@@ -109,6 +110,9 @@ async def create_order(
 
     await db.commit()
     await db.refresh(order)
+    # An order changes available_qty on the pool - same reasoning as
+    # contributions: invalidate immediately rather than waiting on TTL.
+    await invalidate_pool_cache(pool_id)
     return order
 
 
