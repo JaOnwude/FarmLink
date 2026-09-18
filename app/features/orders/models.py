@@ -17,7 +17,7 @@ Day 9 sweep job's query: "find PENDING orders older than 24h".
 import enum
 import uuid
 
-from sqlalchemy import Enum, ForeignKey, Index, Integer, Numeric
+from sqlalchemy import Enum, ForeignKey, Index, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,6 +35,16 @@ class Order(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "orders"
     __table_args__ = (
         Index("ix_orders_status_created_at", "status", "created_at"),
+        # Partial unique index: only enforced when idempotency_key is set,
+        # scoped per buyer (two different buyers could coincidentally
+        # generate the same client-side key string, and that's fine - it's
+        # only meant to catch ONE buyer's request being retried).
+        Index(
+            "uq_orders_buyer_idempotency_key",
+            "buyer_id", "idempotency_key",
+            unique=True,
+            postgresql_where="idempotency_key IS NOT NULL",
+        ),
     )
 
     pool_id: Mapped[uuid.UUID] = mapped_column(
@@ -48,6 +58,11 @@ class Order(UUIDPKMixin, TimestampMixin, Base):
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus, name="order_status"), nullable=False, default=OrderStatus.PENDING
     )
+    # Client-supplied Idempotency-Key header. A retried POST /orders (flaky
+    # connection, double-tap on a slow network) with the same key returns
+    # the order already created instead of placing a second one - the
+    # order-side equivalent of processed_events for webhooks.
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     pool: Mapped["Pool"] = relationship(back_populates="orders")
     buyer: Mapped["User"] = relationship(back_populates="orders")
