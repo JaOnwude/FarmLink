@@ -10,6 +10,8 @@ from app.core.redis_client import redis_client
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.features.auth.router import router as auth_router
+from app.features.pools.router import router as pools_router
+from app.features.contributions.router import router as contributions_router
 
 settings = get_settings()
 
@@ -52,8 +54,8 @@ async def health():
 
 # Each feature owns its own router; wire them in here as they're built.
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
-# from app.features.pools.router import router as pools_router
-# from app.features.contributions.router import router as contributions_router
+app.include_router(pools_router, prefix=settings.api_v1_prefix)
+app.include_router(contributions_router, prefix=settings.api_v1_prefix)
 # from app.features.orders.router import router as orders_router
 # from app.features.payments.router import router as payments_router
 # from app.features.payouts.router import router as payouts_router
