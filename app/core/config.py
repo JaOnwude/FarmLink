@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     # Cache (Redis, cache-aside pattern)
     pool_cache_ttl_seconds: int = 30
 
+    # Sweep job: releases unpaid orders back to the pool after this many
+    # hours (matches the brief's "pay within 24 hours" window), checked
+    # on this interval.
+    sweep_order_max_age_hours: int = 24
+    sweep_interval_minutes: int = 60
+    # Set true in test environments so 45+ tests creating PENDING orders
+    # don't race a live sweep timer running in the background.
+    disable_scheduler: bool = False
+
     # Caching - short TTL is deliberate: pool availability changes on every
     # order, so a stale cache directly risks showing a buyer stock that's
     # already gone. This is a "smooth out read traffic between writes"

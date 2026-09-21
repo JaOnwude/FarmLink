@@ -16,16 +16,21 @@ Order of checks matters and mirrors the flowchart exactly:
   5. available_qty >= qty? -> 409 (ROLLBACK)
   6. mutate + insert + COMMIT
 """
+import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import AsyncSessionLocal
 from app.features.orders.models import Allocation, Order, OrderStatus
 from app.features.pools.models import Pool, PoolStatus
 from app.features.pools.service import invalidate_pool_cache
+
+logger = logging.getLogger("farmlink.sweep")
 
 
 class PoolNotFound(Exception):
@@ -129,3 +134,91 @@ async def list_orders_for_buyer(db: AsyncSession, buyer_id: uuid.UUID) -> list[O
         select(Order).where(Order.buyer_id == buyer_id).order_by(Order.created_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def _release_one_expired_order(order_id: uuid.UUID, cutoff: datetime) -> bool:
+    """One order, one transaction. Returns True if this order was
+    actually released, False if it turned out not to need releasing
+    (already paid/expired by the time we got the lock, or no longer past
+    cutoff - re-checked here, not trusted from the earlier candidate
+    query, because time has passed since that query ran).
+
+    Lock ORDER first, not just the pool: this is what actually closes the
+    race with Day 8's webhook. If a payment succeeds at the exact moment
+    the sweep is about to expire the same order, whichever of the two
+    acquires the order row's lock first wins, and the other sees the
+    already-updated status when it re-checks - exactly the same pattern
+    Day 5 uses for the pool row, applied here to the order row instead.
+    """
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
+        order = result.scalar_one_or_none()
+        if order is None:
+            return False
+        if order.status != OrderStatus.PENDING:
+            # Paid, already expired, or cancelled since the candidate
+            # query ran - most commonly: the webhook won the race.
+            return False
+        if order.created_at >= cutoff:
+            # No longer actually past the window (cutoff is computed once
+            # per sweep run, so this only matters for an order that was
+            # borderline at query time).
+            return False
+
+        pool_result = await db.execute(
+            select(Pool).where(Pool.id == order.pool_id).with_for_update()
+        )
+        pool = pool_result.scalar_one_or_none()
+        if pool is not None:
+            pool.available_qty += order.qty
+
+        order.status = OrderStatus.EXPIRED
+        await db.commit()
+
+    if pool is not None:
+        await invalidate_pool_cache(pool.id)
+    return True
+
+
+async def sweep_expired_orders(
+    max_age_hours: int | None = None,
+) -> int:
+    """Implements the brief's 24h sweep: 'A scheduled sweep releases
+    unpaid orders after 24 hours by adding the quantity back - also
+    under the lock.' Runs on its own schedule (Day 9's APScheduler job),
+    never triggered by user request traffic - a sweep is background
+    maintenance, not something a buyer's page load should be able to
+    kick off or block on.
+
+    Each candidate order gets its OWN transaction rather than one giant
+    transaction for the whole batch: a lock held on every stale order's
+    pool simultaneously would block real traffic for as long as the sweep
+    takes, and one bad row shouldn't roll back released quota for every
+    other order in the same run.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    hours = max_age_hours if max_age_hours is not None else settings.sweep_order_max_age_hours
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Order.id).where(Order.status == OrderStatus.PENDING, Order.created_at < cutoff)
+        )
+        candidate_ids = [row[0] for row in result.all()]
+
+    released_count = 0
+    for order_id in candidate_ids:
+        try:
+            if await _release_one_expired_order(order_id, cutoff):
+                released_count += 1
+        except Exception:
+            # One bad order shouldn't stop the sweep from processing the
+            # rest of the batch - log it and move on. Real observability
+            # (Day 13) is what makes this loud enough to actually notice.
+            logger.exception(f"Sweep failed to release order {order_id}")
+
+    if released_count:
+        logger.info(f"Sweep released {released_count} expired order(s)")
+    return released_count

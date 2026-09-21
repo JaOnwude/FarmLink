@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
@@ -13,16 +14,37 @@ from app.features.auth.router import router as auth_router
 from app.features.pools.router import router as pools_router
 from app.features.contributions.router import router as contributions_router
 from app.features.orders.router import router as orders_router
+from app.features.orders.service import sweep_expired_orders
 from app.features.payments.router import router as payments_router
 
 settings = get_settings()
+scheduler = AsyncIOScheduler()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
-    # Day 4+ will add: DB connectivity check on startup, Firestore init
+    # The sweep never runs on request traffic - it's a background job on
+    # its own clock, exactly as the brief specifies ("A scheduled sweep
+    # releases unpaid orders... also under the lock"). disable_scheduler
+    # exists for deployment, not tests: this suite's httpx ASGITransport
+    # never triggers FastAPI's lifespan at all (verified directly - a
+    # request through it leaves scheduler.running False), so the real
+    # scheduler never starts during any test regardless of this flag.
+    # It matters once there's more than one API instance running in
+    # production - each replica would otherwise start its own sweep timer
+    # and all of them would race the same rows.
+    if not settings.disable_scheduler:
+        scheduler.add_job(
+            sweep_expired_orders,
+            "interval",
+            minutes=settings.sweep_interval_minutes,
+            id="sweep_expired_orders",
+        )
+        scheduler.start()
     yield
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
     await redis_client.aclose()
 
 
