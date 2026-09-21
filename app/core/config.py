@@ -27,9 +27,26 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24h — revisit for production
 
-    # Rate limiting
+    # Rate limiting - general API traffic
     rate_limit_requests: int = 100
     rate_limit_window_seconds: int = 60
+
+    # Stricter limit for auth endpoints specifically (login/register).
+    # The general limit above is tuned for normal API browsing; login
+    # attempts need a much tighter budget or the general limit does
+    # nothing to slow down credential stuffing / registration spam.
+    auth_rate_limit_requests: int = 5
+    auth_rate_limit_window_seconds: int = 300
+
+    # Cache (Redis, cache-aside pattern)
+    pool_cache_ttl_seconds: int = 30
+
+    # Caching - short TTL is deliberate: pool availability changes on every
+    # order, so a stale cache directly risks showing a buyer stock that's
+    # already gone. This is a "smooth out read traffic between writes"
+    # cache, not a "data barely changes" cache - the invalidation on every
+    # write matters more here than the TTL does.
+    pool_cache_ttl_seconds: int = 30
 
     # CORS — comma-separated list of allowed origins, tightened per environment
     cors_allowed_origins: str = "http://localhost:3000"

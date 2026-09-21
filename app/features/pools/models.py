@@ -27,6 +27,13 @@ class Pool(UUIDPKMixin, TimestampMixin, Base):
 
     product: Mapped[str] = mapped_column(String(255), nullable=False)
     price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    # Free-text rather than a fixed enum - a co-op's real unit vocabulary
+    # (bag, basket, mudu, tuber, crate, kg) is broader than any hardcoded
+    # list would cover, and differs by product. Set once by the admin at
+    # pool creation; every contribution and order against this pool is
+    # implicitly in this unit. server_default backfills any pool created
+    # before this column existed.
+    unit: Mapped[str] = mapped_column(String(50), nullable=False, server_default="unit")
     total_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     available_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[PoolStatus] = mapped_column(

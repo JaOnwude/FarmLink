@@ -63,11 +63,20 @@ return {allowed, tostring(tokens)}
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
+    # Path suffixes that get the stricter, auth-specific bucket instead of
+    # the general one. Checked with .endswith() so this doesn't need to
+    # know about the versioned /api/v1 prefix.
+    _SENSITIVE_PATHS = {"/auth/login", "/auth/register"}
+
     def __init__(self, app, redis_client: Redis):
         super().__init__(app)
         self.redis = redis_client
         self.capacity = settings.rate_limit_requests
         self.refill_rate = settings.rate_limit_requests / settings.rate_limit_window_seconds
+        self.auth_capacity = settings.auth_rate_limit_requests
+        self.auth_refill_rate = (
+            settings.auth_rate_limit_requests / settings.auth_rate_limit_window_seconds
+        )
         self._script = self.redis.register_script(_TOKEN_BUCKET_LUA)
 
     async def dispatch(self, request: Request, call_next):
@@ -82,16 +91,27 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # available before authentication even runs, and this check has
         # to happen first per the flowchart.
         client_ip = request.client.host if request.client else "unknown"
-        key = f"ratelimit:{client_ip}"
+
+        is_sensitive = any(request.url.path.endswith(p) for p in self._SENSITIVE_PATHS)
+        if is_sensitive:
+            # A separate bucket (separate Redis key, separate capacity)
+            # from the general one - a login attempt shouldn't spend from
+            # the same budget as ordinary browsing, and vice versa: five
+            # failed logins shouldn't lock a buyer out of viewing pools.
+            key = f"ratelimit:auth:{client_ip}"
+            capacity, refill_rate = self.auth_capacity, self.auth_refill_rate
+        else:
+            key = f"ratelimit:{client_ip}"
+            capacity, refill_rate = self.capacity, self.refill_rate
 
         allowed, tokens_remaining = await self._script(
             keys=[key],
-            args=[self.capacity, self.refill_rate, time.time(), 1],
+            args=[capacity, refill_rate, time.time(), 1],
         )
 
         if not allowed:
             tokens_remaining = float(tokens_remaining)
-            retry_after = math.ceil((1 - tokens_remaining) / self.refill_rate)
+            retry_after = math.ceil((1 - tokens_remaining) / refill_rate)
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded"},

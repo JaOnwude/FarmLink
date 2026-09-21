@@ -45,3 +45,35 @@ async def test_rate_limiter_returns_429_with_retry_after():
             assert int(second.headers["Retry-After"]) >= 1
     finally:
         await redis_client.delete(RATE_LIMIT_KEY)
+
+
+@pytest.mark.asyncio
+async def test_auth_endpoints_have_a_stricter_rate_limit_than_general_api():
+    """Day 6 tuning: /auth/login and /auth/register get a separate,
+    stricter bucket (5 per 5 minutes) than general API traffic (100 per
+    minute) - proven here by draining the auth-specific bucket and
+    confirming a general endpoint (pools) is completely unaffected."""
+    from app.main import app
+
+    auth_key = "ratelimit:auth:127.0.0.1"
+    general_key = "ratelimit:127.0.0.1"
+    await redis_client.delete(auth_key, general_key)
+    try:
+        await redis_client.hset(
+            auth_key, mapping={"tokens": "0", "timestamp": str(time.time())}
+        )
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            login_resp = await ac.post(
+                "/api/v1/auth/login", data={"username": "nobody@test.com", "password": "x"}
+            )
+            assert login_resp.status_code == 429
+            assert "Retry-After" in login_resp.headers
+
+            # The general bucket is untouched - browsing pools still works
+            # even while the auth bucket is fully drained.
+            pools_resp = await ac.get("/api/v1/pools")
+            assert pools_resp.status_code == 200
+    finally:
+        await redis_client.delete(auth_key, general_key)

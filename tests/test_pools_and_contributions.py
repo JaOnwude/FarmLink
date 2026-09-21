@@ -46,7 +46,7 @@ async def test_admin_can_create_pool(client: AsyncClient):
     admin = await _make_user(UserRole.ADMIN)
     resp = await client.post(
         "/api/v1/pools",
-        json={"product": "Rice (50kg bags)", "price": "45000.00"},
+        json={"product": "Rice (50kg bags)", "price": "45000.00", "unit": "bag"},
         headers=_auth_header(admin),
     )
     assert resp.status_code == 201
@@ -62,7 +62,7 @@ async def test_non_admin_cannot_create_pool(client: AsyncClient):
     farmer = await _make_user(UserRole.FARMER)
     resp = await client.post(
         "/api/v1/pools",
-        json={"product": "Rice", "price": "45000.00"},
+        json={"product": "Rice", "price": "45000.00", "unit": "bag"},
         headers=_auth_header(farmer),
     )
     assert resp.status_code == 403
@@ -70,7 +70,7 @@ async def test_non_admin_cannot_create_pool(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_create_pool_without_token_is_401(client: AsyncClient):
-    resp = await client.post("/api/v1/pools", json={"product": "Rice", "price": "45000.00"})
+    resp = await client.post("/api/v1/pools", json={"product": "Rice", "price": "45000.00", "unit": "bag"})
     assert resp.status_code == 401
 
 
@@ -79,7 +79,7 @@ async def test_negative_price_is_422(client: AsyncClient):
     admin = await _make_user(UserRole.ADMIN)
     resp = await client.post(
         "/api/v1/pools",
-        json={"product": "Rice", "price": "-5.00"},
+        json={"product": "Rice", "price": "-5.00", "unit": "bag"},
         headers=_auth_header(admin),
     )
     assert resp.status_code == 422
@@ -90,7 +90,7 @@ async def test_pool_listing_is_public(client: AsyncClient):
     admin = await _make_user(UserRole.ADMIN)
     await client.post(
         "/api/v1/pools",
-        json={"product": "Maize", "price": "30000.00"},
+        json={"product": "Maize", "price": "30000.00", "unit": "bag"},
         headers=_auth_header(admin),
     )
     resp = await client.get("/api/v1/pools")  # no auth header at all
@@ -105,7 +105,7 @@ async def test_farmer_contribution_increases_pool_quantities(client: AsyncClient
 
     pool_resp = await client.post(
         "/api/v1/pools",
-        json={"product": "Beans", "price": "60000.00"},
+        json={"product": "Beans", "price": "60000.00", "unit": "bag"},
         headers=_auth_header(admin),
     )
     pool_id = pool_resp.json()["id"]
@@ -139,7 +139,7 @@ async def test_buyer_cannot_contribute(client: AsyncClient):
     buyer = await _make_user(UserRole.BUYER)
     pool_resp = await client.post(
         "/api/v1/pools",
-        json={"product": "Yam", "price": "10000.00"},
+        json={"product": "Yam", "price": "10000.00", "unit": "bag"},
         headers=_auth_header(admin),
     )
     pool_id = pool_resp.json()["id"]
@@ -160,7 +160,7 @@ async def test_closed_pool_rejects_contributions_with_409(client: AsyncClient):
 
     pool_resp = await client.post(
         "/api/v1/pools",
-        json={"product": "Cassava", "price": "8000.00"},
+        json={"product": "Cassava", "price": "8000.00", "unit": "bag"},
         headers=_auth_header(admin),
     )
     pool_id = pool_resp.json()["id"]
@@ -184,7 +184,7 @@ async def test_closing_already_closed_pool_is_409(client: AsyncClient):
     admin = await _make_user(UserRole.ADMIN)
     pool_resp = await client.post(
         "/api/v1/pools",
-        json={"product": "Sorghum", "price": "9000.00"},
+        json={"product": "Sorghum", "price": "9000.00", "unit": "bag"},
         headers=_auth_header(admin),
     )
     pool_id = pool_resp.json()["id"]
@@ -197,12 +197,94 @@ async def test_closing_already_closed_pool_is_409(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_pool_create_requires_unit(client: AsyncClient):
+    admin = await _make_user(UserRole.ADMIN)
+    resp = await client.post(
+        "/api/v1/pools",
+        json={"product": "Rice", "price": "45000.00"},  # unit omitted
+        headers=_auth_header(admin),
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_pool_out_includes_unit(client: AsyncClient):
+    admin = await _make_user(UserRole.ADMIN)
+    resp = await client.post(
+        "/api/v1/pools",
+        json={"product": "Yam", "price": "10000.00", "unit": "tuber"},
+        headers=_auth_header(admin),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["unit"] == "tuber"
+
+
+@pytest.mark.asyncio
+async def test_contributor_summary_aggregates_per_farmer_not_per_contribution(client: AsyncClient):
+    admin = await _make_user(UserRole.ADMIN)
+    farmer_a = await _make_user(UserRole.FARMER)
+    farmer_b = await _make_user(UserRole.FARMER)
+
+    pool_resp = await client.post(
+        "/api/v1/pools",
+        json={"product": "Maize", "price": "30000.00", "unit": "basket"},
+        headers=_auth_header(admin),
+    )
+    pool_id = pool_resp.json()["id"]
+
+    # Farmer A contributes twice - the summary must show ONE row for them
+    # with the SUM, not two separate rows.
+    await client.post(
+        "/api/v1/contributions",
+        json={"pool_id": pool_id, "qty": 10},
+        headers=_auth_header(farmer_a),
+    )
+    await client.post(
+        "/api/v1/contributions",
+        json={"pool_id": pool_id, "qty": 5},
+        headers=_auth_header(farmer_a),
+    )
+    await client.post(
+        "/api/v1/contributions",
+        json={"pool_id": pool_id, "qty": 8},
+        headers=_auth_header(farmer_b),
+    )
+
+    resp = await client.get(f"/api/v1/contributions/pool/{pool_id}/summary")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert len(rows) == 2  # one row per farmer, not per contribution
+
+    by_id = {row["farmer_id"]: row for row in rows}
+    assert by_id[str(farmer_a.id)]["total_qty"] == 15  # 10 + 5, summed
+    assert by_id[str(farmer_a.id)]["farmer_email"] == farmer_a.email
+    assert by_id[str(farmer_b.id)]["total_qty"] == 8
+    # farmer_id doubles as "contributor ID" - the same account id issued at registration
+    assert by_id[str(farmer_a.id)]["farmer_id"] == str(farmer_a.id)
+
+
+@pytest.mark.asyncio
+async def test_contributor_summary_empty_pool_returns_empty_list(client: AsyncClient):
+    admin = await _make_user(UserRole.ADMIN)
+    pool_resp = await client.post(
+        "/api/v1/pools",
+        json={"product": "Tomatoes", "price": "5000.00", "unit": "crate"},
+        headers=_auth_header(admin),
+    )
+    pool_id = pool_resp.json()["id"]
+
+    resp = await client.get(f"/api/v1/contributions/pool/{pool_id}/summary")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
 async def test_unapproved_farmer_cannot_contribute(client: AsyncClient):
     admin = await _make_user(UserRole.ADMIN)
     unapproved_farmer = await _make_user(UserRole.FARMER, approved=False)
     pool_resp = await client.post(
         "/api/v1/pools",
-        json={"product": "Millet", "price": "7000.00"},
+        json={"product": "Millet", "price": "7000.00", "unit": "bag"},
         headers=_auth_header(admin),
     )
     pool_id = pool_resp.json()["id"]

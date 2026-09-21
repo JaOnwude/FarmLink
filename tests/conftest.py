@@ -13,6 +13,12 @@ did (see app/core/database.py's NullPool comment for the same root
 cause). Postgres solved this by never pooling outside production;
 disconnecting Redis after each test is the equivalent for a client
 that's cheap to reconnect.
+Also resets the rate-limit buckets before every test. Without this, tests
+that hit /auth/login or /auth/register (now rate-limited at just 5 per 5
+minutes, see Day 6's tuning of the auth-specific bucket) would start
+failing with 429s a few tests into the session, purely because they all
+share the same simulated client IP (httpx's ASGITransport defaults to
+127.0.0.1) - not because anything is actually broken.
 """
 import pytest_asyncio
 
@@ -20,6 +26,7 @@ from app.core.redis_client import redis_client
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def _reset_redis_connection_after_test():
+async def _reset_rate_limit_and_redis_connection():
+    await redis_client.delete("ratelimit:127.0.0.1", "ratelimit:auth:127.0.0.1")
     yield
     await redis_client.aclose()

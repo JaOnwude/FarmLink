@@ -29,7 +29,7 @@ async def create_pool(
 async def list_pools(
     status_filter: PoolStatus | None = Query(default=None, alias="status"),
     db: AsyncSession = Depends(get_db),
-) -> list[Pool]:
+) -> list[PoolOut]:
     # Deliberately public (no auth dependency) - browsing what's available
     # to pool into is how a buyer or farmer decides whether to sign up at
     # all. Everything that changes state (create/close/contribute/order)
@@ -38,7 +38,7 @@ async def list_pools(
 
 
 @router.get("/{pool_id}", response_model=PoolOut)
-async def get_pool(pool_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> Pool:
+async def get_pool(pool_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> PoolOut:
     try:
         return await service.get_pool(db, pool_id)
     except service.PoolNotFound:

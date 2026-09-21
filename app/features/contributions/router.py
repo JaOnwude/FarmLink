@@ -11,7 +11,7 @@ from app.core.security import require_role
 from app.features.auth.models import User, UserRole
 from app.features.contributions import service
 from app.features.contributions.models import Contribution
-from app.features.contributions.schemas import ContributionCreate, ContributionOut
+from app.features.contributions.schemas import ContributionCreate, ContributionOut, PoolContributorSummary
 
 router = APIRouter(prefix="/contributions", tags=["contributions"])
 
@@ -37,3 +37,18 @@ async def list_contributions_for_pool(
     pool_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 ) -> list[Contribution]:
     return await service.list_contributions_for_pool(db, pool_id)
+
+
+@router.get("/pool/{pool_id}/summary", response_model=list[PoolContributorSummary])
+async def get_pool_contributor_summary(
+    pool_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> list[PoolContributorSummary]:
+    """Answers: for this pool, which farmers contributed, how much did
+    each contribute IN TOTAL (not per contribution event), and what's
+    their account ID - the exact view asked for: pool + contributors +
+    amounts + contributor IDs in one call."""
+    rows = await service.get_pool_contributor_summary(db, pool_id)
+    return [
+        PoolContributorSummary(farmer_id=farmer_id, farmer_email=email, total_qty=total)
+        for farmer_id, email, total in rows
+    ]
