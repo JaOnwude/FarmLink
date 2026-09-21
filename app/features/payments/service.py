@@ -118,7 +118,12 @@ async def process_webhook_event(db: AsyncSession, raw_body: bytes, signature: st
         await db.commit()
         return
 
-    result = await db.execute(select(Order).where(Order.id == order_id))
+    result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
+    # Locked, not a plain SELECT: closes the race with Day 9's sweep job.
+    # Without this lock, a payment succeeding at the exact moment the
+    # sweep decides this same order is expired could interleave with the
+    # sweep's own lock+check - whichever locks the order row first now
+    # wins outright, the other correctly sees the already-updated status.
     order = result.scalar_one_or_none()
     if order is None or order.status == OrderStatus.PAID:
         # Unknown reference, or already paid (a second success event for
