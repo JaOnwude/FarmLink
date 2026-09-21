@@ -24,7 +24,9 @@ async def create_order(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> Order:
     try:
-        return await service.create_order(db, buyer.id, data.pool_id, data.qty, idempotency_key)
+        return await service.create_order(
+            db, buyer.id, buyer.email, data.pool_id, data.qty, idempotency_key
+        )
     except service.PoolNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pool not found")
     except service.PoolClosed:

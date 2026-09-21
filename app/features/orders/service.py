@@ -26,7 +26,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
+from app.core.jobs import enqueue
 from app.features.orders.models import Allocation, Order, OrderStatus
+from app.features.orders.tasks import notify_admin_of_new_order, send_order_confirmation_email
 from app.features.pools.models import Pool, PoolStatus
 from app.features.pools.service import invalidate_pool_cache
 
@@ -57,6 +59,7 @@ async def _find_by_idempotency_key(
 async def create_order(
     db: AsyncSession,
     buyer_id: uuid.UUID,
+    buyer_email: str,
     pool_id: uuid.UUID,
     qty: int,
     idempotency_key: str | None = None,
@@ -118,6 +121,13 @@ async def create_order(
     # An order changes available_qty on the pool - same reasoning as
     # contributions: invalidate immediately rather than waiting on TTL.
     await invalidate_pool_cache(pool_id)
+
+    # Background jobs (Day 10) - enqueued, not awaited inline. If the API
+    # process restarts right after this line, these still run: they're
+    # sitting in Redis, not in this process's memory.
+    enqueue(send_order_confirmation_email, buyer_email, str(order.id), qty, str(total))
+    enqueue(notify_admin_of_new_order, str(order.id), str(pool_id), buyer_email, qty)
+
     return order
 
 
