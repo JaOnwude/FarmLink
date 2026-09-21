@@ -30,9 +30,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.jobs import enqueue
+from app.features.auth.models import User
 from app.features.orders.models import Order, OrderStatus
 from app.features.payments import paystack_client
 from app.features.payments.models import Payment, ProcessedEvent
+from app.features.payments.tasks import send_payment_confirmation_email
 
 
 class OrderNotFound(Exception):
@@ -141,3 +144,12 @@ async def process_webhook_event(db: AsyncSession, raw_body: bytes, signature: st
     )
     db.add(payment)
     await db.commit()
+
+    # Async SQLAlchemy doesn't do implicit lazy-loading (order.buyer would
+    # raise MissingGreenlet outside an explicit await), so a plain query
+    # for the email is simpler than eager-loading the relationship just
+    # for this one background-job argument.
+    buyer_result = await db.execute(select(User.email).where(User.id == order.buyer_id))
+    buyer_email = buyer_result.scalar_one_or_none()
+    if buyer_email:
+        enqueue(send_payment_confirmation_email, buyer_email, str(order.id), str(payment.amount))

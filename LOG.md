@@ -96,3 +96,21 @@ sees the already-updated status. Verified directly that this test
 suite's ASGI transport never triggers FastAPI's lifespan, so the real
 scheduler never runs during tests. 49 tests. All five of the brief's
 required tests now passing.
+
+## Day 10
+Found nothing to "swap" - no BackgroundTasks calls existed anywhere yet
+(checked, empty), so built the real job queue directly instead of
+building a throwaway version first. RQ + Redis, a separate `worker`
+container (docker-compose.yml) from the API. Order placement now
+enqueues a confirmation email and an admin-notify job; payment success
+enqueues a payment confirmation email - real jobs (they log rather than
+actually send, since no email provider is wired up yet, but the
+queue/worker mechanism itself is real). Tested two ways: enqueue tests
+confirm jobs land in Redis with correct arguments; separate tests
+actually RUN them via RQ's SimpleWorker in burst mode, proving the task
+functions work, not just that something got queued. Went one step
+further and proved the actual claim behind the whole day: enqueued a
+job in one Python process, let that process fully exit, then processed
+it from a completely separate process - confirmed a job genuinely
+survives its enqueuer disappearing, not just plausible in theory.
+53 tests.
