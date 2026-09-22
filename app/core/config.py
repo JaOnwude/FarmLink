@@ -5,6 +5,8 @@ injected by the host (Docker secrets, cloud env vars); locally they come
 from .env (see .env.example).
 """
 from functools import lru_cache
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,7 +40,11 @@ class Settings(BaseSettings):
     auth_rate_limit_requests: int = 5
     auth_rate_limit_window_seconds: int = 300
 
-    # Cache (Redis, cache-aside pattern)
+    # Caching - short TTL is deliberate: pool availability changes on every
+    # order, so a stale cache directly risks showing a buyer stock that's
+    # already gone. This is a "smooth out read traffic between writes"
+    # cache, not a "data barely changes" cache - the invalidation on every
+    # write matters more here than the TTL does.
     pool_cache_ttl_seconds: int = 30
 
     # Sweep job: releases unpaid orders back to the pool after this many
@@ -49,13 +55,6 @@ class Settings(BaseSettings):
     # Set true in test environments so 45+ tests creating PENDING orders
     # don't race a live sweep timer running in the background.
     disable_scheduler: bool = False
-
-    # Caching - short TTL is deliberate: pool availability changes on every
-    # order, so a stale cache directly risks showing a buyer stock that's
-    # already gone. This is a "smooth out read traffic between writes"
-    # cache, not a "data barely changes" cache - the invalidation on every
-    # write matters more here than the TTL does.
-    pool_cache_ttl_seconds: int = 30
 
     # CORS — comma-separated list of allowed origins, tightened per environment
     cors_allowed_origins: str = "http://localhost:3000"
@@ -77,6 +76,21 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @model_validator(mode="after")
+    def _forbid_wildcard_cors_in_production(self) -> "Settings":
+        """Day 13 hardening: a wildcard or empty CORS origin list is a
+        reasonable dev default and a real security mistake in
+        production - this makes it impossible to ship silently rather
+        than relying on someone remembering to check .env before
+        deploying. Fails fast at startup, not at the first request."""
+        if self.is_production:
+            if not self.cors_origins_list or "*" in self.cors_origins_list:
+                raise ValueError(
+                    "CORS_ALLOWED_ORIGINS must be a specific, non-wildcard origin list "
+                    "when ENVIRONMENT=production - refusing to start with an open CORS policy."
+                )
+        return self
 
 
 @lru_cache
