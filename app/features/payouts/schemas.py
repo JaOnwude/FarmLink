@@ -1,7 +1,18 @@
 """
 Payouts feature - Pydantic request/response models.
-Build target: Day 12
 """
+import uuid
+from datetime import datetime
+from decimal import Decimal
+
 from pydantic import BaseModel
 
-# TODO (Day 12): define request/response schemas here
+
+class PayoutOut(BaseModel):
+    id: uuid.UUID
+    pool_id: uuid.UUID
+    farmer_id: uuid.UUID
+    amount: Decimal
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

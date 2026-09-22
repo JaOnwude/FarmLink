@@ -94,8 +94,9 @@ interleave with the sweep's check. Fixed by locking the ORDER row
 whichever acquires the lock first wins outright, the other correctly
 sees the already-updated status. Verified directly that this test
 suite's ASGI transport never triggers FastAPI's lifespan, so the real
-scheduler never runs during tests. 49 tests. All five of the brief's
-required tests now passing.
+scheduler never runs during tests. 49 tests. Four of the brief's five
+required tests now passing (the fifth - payout sum + second share-out
+409 - needs the payouts feature, Day 12).
 
 ## Day 10
 Found nothing to "swap" - no BackgroundTasks calls existed anywhere yet
@@ -141,3 +142,29 @@ registered, just invoked as a plain coroutine) rather than through the
 one layer that can't handle it - still real concurrency, real Redis,
 real pool-scoping, just without the ASGI simulation in between.
 58 tests.
+
+## Day 12
+Payouts - the last unbuilt feature, and a correction owed: Day 9's log
+claimed "all five of the brief's required tests now passing." That was
+wrong - the actual fifth test ("Payout amounts sum to revenue; a second
+share-out -> 409") needed this feature, which didn't exist yet. Flagged
+and corrected before building, not glossed over.
+
+Built POST /payouts/pools/{id}/distribute (admin-only): locks the pool
+(same SELECT...FOR UPDATE pattern as every other pool mutation),
+requires it CLOSED first, computes each contributing farmer's
+proportional share of paid-order revenue, and guards against a second
+distribution two independent ways - an explicit pre-check under the
+lock, plus the Day 2 UNIQUE(pool_id, farmer_id) constraint as a second,
+DB-level line of defense.
+
+Found and fixed a real rounding bug while matching an existing,
+well-designed test file: splitting revenue by contribution share rarely
+divides evenly, so one farmer must absorb the leftover kobo. My first
+version gave the remainder to whichever farmer was processed last in
+qty-DESCENDING order - the smallest contributor. Reversed it: process
+ascending by qty, so the LARGEST contributor absorbs the rounding slack
+instead, both because it's the more defensible norm and because it's
+what the test (deliberately using a non-terminating 1/3 vs 2/3 split,
+not a number that happens to divide evenly) required. 63 tests.
+All five of the brief's required tests now actually, verifiably passing.
