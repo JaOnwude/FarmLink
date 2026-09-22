@@ -61,7 +61,7 @@ def _auth_header(user: User) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_placing_an_order_enqueues_two_jobs(client: AsyncClient):
+async def test_placing_an_order_enqueues_the_expected_jobs(client: AsyncClient):
     admin = await _make_user(UserRole.ADMIN)
     farmer = await _make_user(UserRole.FARMER)
     buyer = await _make_user(UserRole.BUYER)
@@ -77,14 +77,17 @@ async def test_placing_an_order_enqueues_two_jobs(client: AsyncClient):
         json={"pool_id": pool_id, "qty": 20},
         headers=_auth_header(farmer),
     )
+    # The contribution itself enqueues one job too (Day 11's durable
+    # Firestore write for the pool feed) - not zero.
+    assert len(job_queue) == 1
+    job_queue.empty()
 
-    assert len(job_queue) == 0
     order_resp = await client.post(
         "/api/v1/orders", json={"pool_id": pool_id, "qty": 5}, headers=_auth_header(buyer)
     )
     assert order_resp.status_code == 201
-    # One job for the buyer's confirmation email, one for admin-notify.
-    assert len(job_queue) == 2
+    # Confirmation email + admin-notify (Day 10) + Firestore feed write (Day 11).
+    assert len(job_queue) == 3
 
 
 @pytest.mark.asyncio
@@ -138,16 +141,17 @@ async def test_idempotent_retry_does_not_enqueue_duplicate_jobs(client: AsyncCli
         json={"pool_id": pool_id, "qty": 20},
         headers=_auth_header(farmer),
     )
+    job_queue.empty()  # clear the contribution's own Firestore-write job first
 
     key = str(uuid.uuid4())
     headers = {**_auth_header(buyer), "Idempotency-Key": key}
     await client.post("/api/v1/orders", json={"pool_id": pool_id, "qty": 5}, headers=headers)
-    assert len(job_queue) == 2
+    assert len(job_queue) == 3
 
     # Retry with the same key - must NOT enqueue a second round of jobs,
     # or a flaky-connection retry would email the buyer twice.
     await client.post("/api/v1/orders", json={"pool_id": pool_id, "qty": 5}, headers=headers)
-    assert len(job_queue) == 2
+    assert len(job_queue) == 3
 
 
 @pytest.mark.asyncio

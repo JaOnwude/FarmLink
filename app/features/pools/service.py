@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cache_delete, cache_get, cache_set
 from app.core.config import get_settings
+from app.features.feed.service import publish_pool_event
 from app.features.pools.models import Pool, PoolStatus
 from app.features.pools.schemas import PoolCreate, PoolOut
 
@@ -132,4 +133,5 @@ async def close_pool(db: AsyncSession, pool_id: uuid.UUID) -> Pool:
     await db.commit()
     await db.refresh(pool)
     await invalidate_pool_cache(pool_id)
+    await publish_pool_event(pool_id, "pool.closed", {})
     return pool

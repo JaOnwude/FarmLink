@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.auth.models import User
 from app.features.contributions.models import Contribution
+from app.features.feed.service import publish_pool_event
 from app.features.pools.models import Pool, PoolStatus
 from app.features.pools.service import invalidate_pool_cache
 
@@ -51,6 +52,11 @@ async def create_contribution(
     # A contribution changes total_qty/available_qty on the pool - any
     # cached listing or single-pool view is stale as of this commit.
     await invalidate_pool_cache(pool_id)
+    await publish_pool_event(
+        pool_id,
+        "contribution.added",
+        {"farmer_id": str(farmer_id), "qty": qty, "available_qty": pool.available_qty},
+    )
     return contribution
 
 
