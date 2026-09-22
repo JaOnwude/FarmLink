@@ -114,3 +114,30 @@ job in one Python process, let that process fully exit, then processed
 it from a completely separate process - confirmed a job genuinely
 survives its enqueuer disappearing, not just plausible in theory.
 53 tests.
+
+## Day 11
+Real-time feed. A design fork worth remembering: the original plan (Day
+1) was Firestore specifically for SSE fan-out across multiple
+processes - but Redis is already a hard dependency (cache, rate limit,
+job queue) and solves the same multi-instance problem for free via
+pub/sub, while this sandbox has no network path to Google Cloud to test
+Firestore against at all. Built the SSE stream on Redis pub/sub (real,
+tested, working now) and kept Firestore as a genuinely separate,
+isolated write path (features/feed/firestore_client.py, same pattern as
+paystack_client.py) that safely no-ops until real GCP credentials exist
+- a config change later, not a rebuild. Also found and retired a
+duplicate: an earlier in-process asyncio.Queue broadcaster existed
+alongside my Redis version: kept the Redis one since it removes the
+single-instance limitation the other explicitly documented, at zero
+extra infrastructure cost.
+
+Hit a real wall testing the SSE endpoint: httpx.ASGITransport (this
+suite's test double) cannot cleanly handle an infinite StreamingResponse
+- confirmed directly with five isolated reproductions outside pytest
+that even just receiving the initial response hangs, regardless of how
+it's consumed or closed. Not a bug in the endpoint. Solved by calling
+the router function directly (the exact same function FastAPI has
+registered, just invoked as a plain coroutine) rather than through the
+one layer that can't handle it - still real concurrency, real Redis,
+real pool-scoping, just without the ASGI simulation in between.
+58 tests.

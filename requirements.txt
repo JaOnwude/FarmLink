@@ -17,3 +17,5 @@ pytest-asyncio==0.24.0
 testcontainers[postgres]==4.8.1
 apscheduler==3.10.4
 rq==1.16.2
+google-cloud-firestore==2.31.0
+google-cloud-firestore==2.31.0

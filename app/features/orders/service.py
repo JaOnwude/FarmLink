@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
 from app.core.jobs import enqueue
+from app.features.feed.service import publish_pool_event
 from app.features.orders.models import Allocation, Order, OrderStatus
 from app.features.orders.tasks import notify_admin_of_new_order, send_order_confirmation_email
 from app.features.pools.models import Pool, PoolStatus
@@ -127,6 +128,11 @@ async def create_order(
     # sitting in Redis, not in this process's memory.
     enqueue(send_order_confirmation_email, buyer_email, str(order.id), qty, str(total))
     enqueue(notify_admin_of_new_order, str(order.id), str(pool_id), buyer_email, qty)
+    await publish_pool_event(
+        pool_id,
+        "order.placed",
+        {"order_id": str(order.id), "qty": qty, "available_qty": pool.available_qty},
+    )
 
     return order
 
@@ -187,6 +193,11 @@ async def _release_one_expired_order(order_id: uuid.UUID, cutoff: datetime) -> b
 
     if pool is not None:
         await invalidate_pool_cache(pool.id)
+        await publish_pool_event(
+            pool.id,
+            "order.expired",
+            {"order_id": str(order_id), "qty": order.qty, "available_qty": pool.available_qty},
+        )
     return True
 
 

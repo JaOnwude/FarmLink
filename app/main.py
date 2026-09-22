@@ -16,6 +16,7 @@ from app.features.contributions.router import router as contributions_router
 from app.features.orders.router import router as orders_router
 from app.features.orders.service import sweep_expired_orders
 from app.features.payments.router import router as payments_router
+from app.features.feed.router import router as feed_router
 
 settings = get_settings()
 scheduler = AsyncIOScheduler()
@@ -82,6 +83,7 @@ app.include_router(pools_router, prefix=settings.api_v1_prefix)
 app.include_router(contributions_router, prefix=settings.api_v1_prefix)
 app.include_router(orders_router, prefix=settings.api_v1_prefix)
 app.include_router(payments_router, prefix=settings.api_v1_prefix)
+app.include_router(feed_router, prefix=settings.api_v1_prefix)
 # from app.features.payouts.router import router as payouts_router
 # from app.features.feed.router import router as feed_router
 #
