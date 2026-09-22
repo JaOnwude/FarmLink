@@ -168,3 +168,31 @@ instead, both because it's the more defensible norm and because it's
 what the test (deliberately using a non-terminating 1/3 vs 2/3 split,
 not a number that happens to divide evenly) required. 63 tests.
 All five of the brief's required tests now actually, verifiably passing.
+
+## Day 13
+Hardening. Checked what was actually missing rather than assuming:
+confirmed via grep there was no global exception handling anywhere - an
+unexpected bug in any route would show up in logs as a bare "500" with
+zero detail, no traceback, no way to diagnose it in production.
+
+First attempt used FastAPI's @app.exception_handler(Exception) - built,
+tested, and the test caught a real problem: it doesn't actually run when
+custom BaseHTTPMiddleware subclasses are in the stack (this project has
+two: RequestContextMiddleware, RateLimitMiddleware), a confirmed
+Starlette/FastAPI interaction issue, not a config mistake. Moved the
+handling into RequestContextMiddleware itself, the outermost layer that
+actually sees every exception - now every unhandled error is logged
+once with full traceback + request_id, and the client gets a clean
+generic 500 with just the request_id, never internal details.
+
+Also: a wildcard CORS origin now hard-fails at startup if
+ENVIRONMENT=production (was previously just a config value nobody was
+forced to double-check), found and removed a duplicate pool_cache_ttl_
+seconds field in config.py from an earlier day, ran a real secrets scan
+across the repo (clean), and unit-tested the JSONFormatter directly -
+never actually verified since Day 1, since configure_logging() only
+runs in the app's lifespan, which this suite's test transport never
+triggers. Load-tested the concurrency lock at higher contention than
+Day 5's minimal case: 20 genuinely concurrent buyers racing 5 units -
+exactly 5 succeeded, exactly 15 rejected, available_qty landed exactly
+at zero. 69 tests.

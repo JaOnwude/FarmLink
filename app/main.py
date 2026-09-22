@@ -78,6 +78,12 @@ async def health():
     return {"status": "ok", "environment": settings.environment}
 
 
+# Unhandled-exception handling lives in RequestContextMiddleware, not a
+# @app.exception_handler here - see that module's docstring for why
+# (a confirmed BaseHTTPMiddleware + exception-handler interaction issue,
+# not a stylistic choice).
+
+
 # Each feature owns its own router; wire them in here as they're built.
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(pools_router, prefix=settings.api_v1_prefix)
