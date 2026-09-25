@@ -1,5 +1,5 @@
 """
-Orders feature - background jobs, run by the worker process (Day 10),
+Orders feature - background jobs, run by the worker process,
 not inline with the request that triggers them.
 
 Plain synchronous functions - RQ workers are synchronous processes, not

@@ -14,8 +14,8 @@ router = APIRouter(prefix="/feed", tags=["feed"])
 @router.get("/pools/{pool_id}/stream")
 async def stream_pool_feed(pool_id: uuid.UUID) -> StreamingResponse:
     """Server-Sent Events: live activity on one pool (contributions,
-    orders, closes) as they happen. No auth dependency - matches
-    GET /pools' own reasoning (Day 4): watching a pool fill up is
+    orders, closes) as they happen. No auth dependency - same reasoning
+    as GET /pools being public: watching a pool fill up in real time is
     exactly the kind of thing that should work before someone has an
     account, same as browsing the pool listing itself.
 

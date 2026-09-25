@@ -1,15 +1,18 @@
 """
-Implements "Middleware: request-id, timing, logging" from the flowchart.
+Request-scoped logging middleware: assigns a request ID, times the
+request, logs a one-line summary, and turns any unhandled exception into
+a clean 500 instead of a raw traceback reaching the client.
 
 Every request gets a unique X-Request-ID (accepted from the client if
 supplied, generated otherwise) which is:
-  - attached to every log line for that request
-  - echoed back on the response, matching "Response model -> status code
-    + X-Request-ID" at the end of the flowchart
+  - attached to every log line for that request, so all log lines from
+    one request can be grepped/filtered together
+  - echoed back on the response headers, so the client can quote it when
+    reporting a problem
   - useful later to correlate a Paystack webhook failure with the order
     request that triggered it
 
-Also the actual home of Day 13's unhandled-exception handling - NOT
+Also the actual home of this app's unhandled-exception handling - NOT
 FastAPI's @app.exception_handler(Exception), which doesn't reliably
 catch exceptions when custom BaseHTTPMiddleware subclasses (this one,
 and RateLimitMiddleware) are in the stack. Confirmed directly: a

@@ -41,6 +41,7 @@ services:
     volumes:
       - ./app:/code/app
       - ./alembic:/code/alembic
+      - ./firestore-credentials.json:/code/firestore-credentials.json:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   worker:
@@ -55,9 +56,9 @@ services:
     volumes:
       - ./app:/code/app
     # Deliberately a separate container from `api`, not a thread or
-    # subprocess inside it - that separation is what makes an enqueued
-    # job (Day 10) survive an API restart: this container keeps pulling
-    # from the Redis queue regardless of what happens to `api`.
+    # subprocess inside it - that separation is what lets an enqueued
+    # job survive an API restart: this container keeps pulling from the
+    # Redis queue regardless of what happens to `api`.
     command: python -m app.worker
 
 volumes:

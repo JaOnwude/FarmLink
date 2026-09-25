@@ -1,20 +1,23 @@
 """
 Orders feature - business logic, called by router.py.
 
-This is "the hard problem" from the brief: the pool row is the single
-source of truth for what's left to sell. SELECT ... FOR UPDATE locks that
-row for the whole transaction, so when two buyers race for the same
-stock, the second one's SELECT blocks until the first COMMITs, then sees
-the ALREADY-REDUCED available_qty and correctly fails with 409 instead of
-both succeeding and taking the pool negative.
+This module handles the trickiest concurrency problem in the app: many
+buyers can try to order from the same pool of stock at the same time, and
+the pool must never be sold below zero. The pool row is treated as the
+single source of truth for what's left to sell, and `SELECT ... FOR
+UPDATE` locks that row for the whole transaction. So when two buyers race
+for the same stock, the second buyer's SELECT blocks until the first
+buyer's transaction COMMITs, then it sees the ALREADY-REDUCED
+available_qty and correctly fails with a 409 Conflict instead of both
+requests succeeding and taking the pool negative.
 
-Order of checks matters and mirrors the flowchart exactly:
-  1. idempotency check (cheap, no lock needed yet)
-  2. lock the pool row
-  3. pool exists?          -> 404
-  4. pool OPEN?            -> 409 (ROLLBACK)
-  5. available_qty >= qty? -> 409 (ROLLBACK)
-  6. mutate + insert + COMMIT
+The order in which checks happen matters and is deliberate:
+  1. idempotency check (cheap, plain read, no row lock needed yet)
+  2. lock the pool row (SELECT ... FOR UPDATE)
+  3. does the pool exist?              -> 404 if not
+  4. is the pool still OPEN?           -> 409 + ROLLBACK if not
+  5. is there enough available_qty?    -> 409 + ROLLBACK if not
+  6. mutate the pool, insert the order, COMMIT
 """
 import logging
 import uuid
@@ -88,7 +91,13 @@ async def create_order(
         await db.rollback()
         raise InsufficientStock(pool_id)
 
+    # Price is snapshotted onto the order at creation time (not looked up
+    # again later), so a later price change on the pool never retroactively
+    # changes what an already-placed order is charged.
     total: Decimal = pool.price * qty
+    # Safe to mutate directly: we're still holding the row lock acquired by
+    # the SELECT ... FOR UPDATE above, so no other transaction can be
+    # reading or writing this same row concurrently.
     pool.available_qty -= qty
 
     order = Order(
@@ -123,9 +132,12 @@ async def create_order(
     # contributions: invalidate immediately rather than waiting on TTL.
     await invalidate_pool_cache(pool_id)
 
-    # Background jobs (Day 10) - enqueued, not awaited inline. If the API
-    # process restarts right after this line, these still run: they're
-    # sitting in Redis, not in this process's memory.
+    # Background jobs - enqueued into Redis, not awaited inline. Sending an
+    # email or pinging an admin isn't part of what makes the order valid,
+    # so there's no reason to make the buyer's request wait on it. It also
+    # means these still run even if the API process restarts right after
+    # this line: the job is sitting in Redis, not held in this process's
+    # memory, so a worker process can pick it up independently.
     enqueue(send_order_confirmation_email, buyer_email, str(order.id), qty, str(total))
     enqueue(notify_admin_of_new_order, str(order.id), str(pool_id), buyer_email, qty)
     await publish_pool_event(
@@ -159,12 +171,13 @@ async def _release_one_expired_order(order_id: uuid.UUID, cutoff: datetime) -> b
     cutoff - re-checked here, not trusted from the earlier candidate
     query, because time has passed since that query ran).
 
-    Lock ORDER first, not just the pool: this is what actually closes the
-    race with Day 8's webhook. If a payment succeeds at the exact moment
-    the sweep is about to expire the same order, whichever of the two
-    acquires the order row's lock first wins, and the other sees the
-    already-updated status when it re-checks - exactly the same pattern
-    Day 5 uses for the pool row, applied here to the order row instead.
+    Lock the ORDER row first, not just the pool row: this is what actually
+    closes the race against the payment webhook. If a payment succeeds at
+    the exact moment the sweep is about to expire the same order, whichever
+    of the two acquires the order row's lock first wins, and the other one
+    sees the already-updated status when it re-checks afterwards - the
+    same SELECT ... FOR UPDATE pattern used for the pool row in
+    create_order() above, applied here to the order row instead.
     """
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
@@ -204,12 +217,12 @@ async def _release_one_expired_order(order_id: uuid.UUID, cutoff: datetime) -> b
 async def sweep_expired_orders(
     max_age_hours: int | None = None,
 ) -> int:
-    """Implements the brief's 24h sweep: 'A scheduled sweep releases
-    unpaid orders after 24 hours by adding the quantity back - also
-    under the lock.' Runs on its own schedule (Day 9's APScheduler job),
-    never triggered by user request traffic - a sweep is background
-    maintenance, not something a buyer's page load should be able to
-    kick off or block on.
+    """Finds every order that's been sitting in PENDING (created but never
+    paid for) past the configured age limit, and releases the quantity it
+    was holding back to the pool. Runs on its own APScheduler timer (wired
+    up in main.py's lifespan), never triggered by user request traffic - a
+    sweep is background maintenance, not something a buyer's page load
+    should be able to kick off or block on.
 
     Each candidate order gets its OWN transaction rather than one giant
     transaction for the whole batch: a lock held on every stale order's
@@ -236,8 +249,10 @@ async def sweep_expired_orders(
                 released_count += 1
         except Exception:
             # One bad order shouldn't stop the sweep from processing the
-            # rest of the batch - log it and move on. Real observability
-            # (Day 13) is what makes this loud enough to actually notice.
+            # rest of the batch - log it and move on to the next candidate.
+            # Structured logging with the failing order_id is what makes
+            # this loud enough to actually notice and investigate later,
+            # instead of silently swallowing the failure.
             logger.exception(f"Sweep failed to release order {order_id}")
 
     if released_count:

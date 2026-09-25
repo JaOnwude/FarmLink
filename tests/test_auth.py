@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
@@ -145,3 +146,99 @@ async def test_require_role_blocks_wrong_role(client: AsyncClient):
         "/api/v1/probe/admin-only", headers={"Authorization": f"Bearer {buyer_token}"}
     )
     assert forbidden_resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_can_list_and_approve_pending_user(client: AsyncClient):
+    from app.core.security import create_access_token
+
+    async with AsyncSessionLocal() as db:
+        admin = User(
+            email=f"admin-approve-{uuid.uuid4().hex[:8]}@test.com",
+            password_hash=hash_password("whatever-12345"),
+            role=UserRole.ADMIN,
+            approved=True,
+        )
+        db.add(admin)
+        await db.commit()
+        await db.refresh(admin)
+    admin_token = create_access_token(admin.id, admin.role)
+
+    farmer_email = f"farmer-approve-{uuid.uuid4().hex[:8]}@test.com"
+    register_resp = await client.post(
+        "/api/v1/auth/register",
+        json={"email": farmer_email, "password": "correct-horse-battery", "role": "farmer"},
+    )
+    farmer_id = register_resp.json()["id"]
+
+    # Filtered by role, since that's the query param the endpoint supports.
+    pending_resp = await client.get(
+        "/api/v1/auth/pending?role=farmer",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert pending_resp.status_code == 200
+    assert any(u["id"] == farmer_id for u in pending_resp.json())
+
+    approve_resp = await client.patch(
+        f"/api/v1/auth/{farmer_id}/approve",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert approve_resp.status_code == 200
+    assert approve_resp.json()["approved"] is True
+
+    # Approving twice is idempotent, not an error - confirms the "admin
+    # double-clicks approve" case doesn't blow up.
+    second_approve_resp = await client.patch(
+        f"/api/v1/auth/{farmer_id}/approve",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert second_approve_resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_approving_unknown_user_is_404(client: AsyncClient):
+    from app.core.security import create_access_token
+
+    async with AsyncSessionLocal() as db:
+        admin = User(
+            email=f"admin-404-{uuid.uuid4().hex[:8]}@test.com",
+            password_hash=hash_password("whatever-12345"),
+            role=UserRole.ADMIN,
+            approved=True,
+        )
+        db.add(admin)
+        await db.commit()
+        await db.refresh(admin)
+    admin_token = create_access_token(admin.id, admin.role)
+
+    resp = await client.patch(
+        f"/api/v1/auth/{uuid.uuid4()}/approve",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_list_or_approve_pending_users(client: AsyncClient):
+    buyer_email = f"buyer-noapprove-{uuid.uuid4().hex[:8]}@test.com"
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": buyer_email, "password": "correct-horse-battery", "role": "buyer"},
+    )
+    # Approve this buyer directly in the DB so the 403 below is proven to
+    # come from the role check, not from the approval gate.
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(User).where(User.email == buyer_email))
+        buyer = result.scalar_one()
+        buyer.approved = True
+        await db.commit()
+
+    login_resp = await client.post(
+        "/api/v1/auth/login", data={"username": buyer_email, "password": "correct-horse-battery"}
+    )
+    buyer_token = login_resp.json()["access_token"]
+
+    resp = await client.get(
+        "/api/v1/auth/pending", headers={"Authorization": f"Bearer {buyer_token}"}
+    )
+    assert resp.status_code == 403

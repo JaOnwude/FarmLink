@@ -1,5 +1,10 @@
 """
 Orders feature - HTTP layer only.
+
+Translates HTTP requests into calls to `service.py` and turns the
+service's domain exceptions (PoolNotFound, PoolClosed, InsufficientStock)
+into the right HTTP status codes. No business logic lives here - if you're
+looking for the actual order-placement rules, see orders/service.py.
 """
 import uuid
 
@@ -21,12 +26,20 @@ async def create_order(
     data: OrderCreate,
     db: AsyncSession = Depends(get_db),
     buyer: User = Depends(require_role(UserRole.BUYER)),
+    # Optional client-supplied key so a retried/duplicated HTTP request
+    # (e.g. a mobile client that timed out and resent) doesn't create a
+    # second order - service.create_order() uses this to return the
+    # original order instead of creating a duplicate.
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> Order:
     try:
         return await service.create_order(
             db, buyer.id, buyer.email, data.pool_id, data.qty, idempotency_key
         )
+    # Each domain-level exception from the service layer maps to a
+    # specific, client-friendly HTTP status - the service layer itself
+    # knows nothing about HTTP status codes, only about order-placement
+    # rules.
     except service.PoolNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pool not found")
     except service.PoolClosed:
@@ -57,9 +70,11 @@ async def get_order(
         order = await service.get_order(db, order_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
-    # Ownership check: a buyer can see their own orders; an admin can see
-    # any. This is the "and ownership" half of the flowchart's "Role and
-    # ownership permit this?" step - require_role only checked role.
+    # require_role() above only checks that the caller HAS an allowed
+    # role (buyer or admin) - it says nothing about WHICH orders they're
+    # allowed to see. This second check adds ownership on top: a plain
+    # buyer may only view their own orders, while an admin can view any
+    # order regardless of who placed it.
     if user.role == UserRole.BUYER and order.buyer_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your order")
     return order

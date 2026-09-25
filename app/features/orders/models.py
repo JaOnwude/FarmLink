@@ -5,14 +5,17 @@ orders (pool, buyer, qty, total, status, created_at) - index(status, created_at)
 allocations (order, pool, qty)
 
 Both live here, not split across two feature folders, because they're
-written in the exact same transaction (see the brief's "hard problem"
-diagram: UPDATE pool.available_qty -= quantity . INSERT order and
-allocation, same COMMIT). Splitting them would mean importing across
-feature boundaries for no benefit - allocations has no purpose outside
-the order-placement flow.
+always written in the exact same database transaction: reducing
+pool.available_qty, then inserting the order and its allocation, all
+under one COMMIT (see create_order() in orders/service.py). Splitting
+them into separate features would mean importing across feature
+boundaries for no real benefit - an Allocation has no purpose outside
+the order-placement flow it's created in.
 
-The (status, created_at) composite index exists specifically for the
-Day 9 sweep job's query: "find PENDING orders older than 24h".
+The (status, created_at) composite index exists specifically to make the
+background sweep job's query fast: "find PENDING orders older than N
+hours" needs to filter by status and range-scan by created_at, and this
+index covers exactly that combination.
 """
 import enum
 import uuid

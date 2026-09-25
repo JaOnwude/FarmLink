@@ -48,8 +48,9 @@ class Settings(BaseSettings):
     pool_cache_ttl_seconds: int = 30
 
     # Sweep job: releases unpaid orders back to the pool after this many
-    # hours (matches the brief's "pay within 24 hours" window), checked
-    # on this interval.
+    # hours (buyers get a 24-hour window to complete payment before their
+    # reserved stock is released back for others to order), checked on
+    # this interval.
     sweep_order_max_age_hours: int = 24
     sweep_interval_minutes: int = 60
     # Set true in test environments so 45+ tests creating PENDING orders
@@ -65,6 +66,12 @@ class Settings(BaseSettings):
     paystack_public_key: str
     paystack_webhook_ip_allowlist: bool = True  # Paystack publishes fixed webhook IPs
 
+        # First admin, created at deployment time - never through the API.
+    # Set these in production's secret manager; rotate the password
+    # immediately after first login.
+    admin_bootstrap_email: str | None = None
+    admin_bootstrap_password: str | None = None
+
     # Firestore (real-time feed)
     firestore_project_id: str | None = None
     firestore_credentials_path: str | None = None  # path to service account json
@@ -79,11 +86,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _forbid_wildcard_cors_in_production(self) -> "Settings":
-        """Day 13 hardening: a wildcard or empty CORS origin list is a
-        reasonable dev default and a real security mistake in
-        production - this makes it impossible to ship silently rather
-        than relying on someone remembering to check .env before
-        deploying. Fails fast at startup, not at the first request."""
+        """Security hardening: a wildcard ("*") or empty CORS origin list
+        is a reasonable default for local development, but a real
+        security mistake in production (it lets any website make
+        authenticated requests to this API). This validator makes that
+        misconfiguration impossible to ship silently, rather than relying
+        on someone remembering to check .env before deploying - it fails
+        fast at application startup, not at the first request."""
         if self.is_production:
             if not self.cors_origins_list or "*" in self.cors_origins_list:
                 raise ValueError(

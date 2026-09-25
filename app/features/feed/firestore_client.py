@@ -61,7 +61,7 @@ def _get_client():
 
 def write_pool_feed_event(pool_id: str, event_type: str, data: dict) -> None:
     """One document per event, under pools/{pool_id}/feed. Called from a
-    background job (Day 10's queue), never inline with the request that
+    background job (the same Redis-backed queue used elsewhere), never inline with the request that
     triggers it - a slow or unreachable Firestore must never add latency
     to placing an order or a contribution."""
     client = _get_client()

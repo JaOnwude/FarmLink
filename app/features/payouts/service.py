@@ -1,16 +1,17 @@
 """
 Payouts feature - business logic.
 
-"Sharing out a pool can happen only once" - the brief's own words, and
-the source of the fifth required test: "Payout amounts sum to revenue;
-a second share-out -> 409."
+Core rule: sharing out the revenue from a closed pool can happen only
+once. Farmers who contributed stock to the pool each get a share of the
+pool's total revenue, in proportion to how much they contributed, and
+that calculation must never run twice for the same pool.
 
 Two independent guards against a double payout, not one:
   1. An explicit pre-check (any payout rows already exist for this pool?)
      under the same SELECT ... FOR UPDATE lock every other pool mutation
      in this project uses - the first line of defense, and the one that
      gives a clean, immediate 409 in the normal case.
-  2. The Day 2 UNIQUE(pool_id, farmer_id) constraint on payouts itself,
+  2. A UNIQUE(pool_id, farmer_id) constraint on the payouts table itself,
      which catches it even if two "pay out this pool" requests somehow
      both got past guard #1 (they can't, under the lock - but a
      constraint that makes the invariant true at the database level,
