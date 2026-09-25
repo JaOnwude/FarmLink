@@ -5,9 +5,14 @@ FastAPI dependencies every protected route in every feature depends on
 features/auth/ because it's used well beyond the auth feature itself -
 see CONTRIBUTING.md's core/ vs features/ rule.
 
-Implements two steps from the brief's flowchart:
-  "Credential valid (JWT / cookie / API key)?" -> 401  ->  get_current_user
-  "Role and ownership permit this?"            -> 403  ->  require_role
+This module answers two questions, in order, for every protected route:
+  1. Is the caller who they claim to be? (valid JWT?) -> get_current_user,
+     returns 401 if not.
+  2. Is that caller allowed to do THIS? (right role, approved account?)
+     -> require_role, returns 403 if not.
+Ownership checks that go one level deeper than role (e.g. "is this
+buyer's OWN order") are handled separately in each feature's own
+service.py, since only that feature knows what "owns" means for its data.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -70,10 +75,11 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """The '401 Unauthorized' step in the flowchart. Any failure here -
-    missing token, bad signature, expired, user deleted since the token
-    was issued - collapses to the same 401 so we never leak which part
-    failed to an unauthenticated caller."""
+    """Decodes and validates the bearer token, then loads the matching
+    user from the database. Any failure here - missing token, bad
+    signature, expired token, or a user that's since been deleted from
+    the database - collapses to the exact same 401 response, so an
+    unauthenticated caller can never tell which specific check failed."""
     credentials_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -95,12 +101,14 @@ async def get_current_user(
 
 
 def require_role(*allowed_roles: UserRole):
-    """The '403 Forbidden' step in the flowchart. Usage per-endpoint:
+    """Factory for a FastAPI dependency that restricts a route to specific
+    roles. Usage per-endpoint:
         @router.post("/pools")
         async def create_pool(user: User = Depends(require_role(UserRole.ADMIN))):
     Ownership checks (e.g. 'is this buyer's own order') are one level more
     specific than role and stay in each feature's service.py, not here -
-    this only knows about roles, not which row is being touched."""
+    this dependency only knows about roles, not which specific row is
+    being touched."""
 
     async def _dependency(user: User = Depends(get_current_user)) -> User:
         if user.role not in allowed_roles:

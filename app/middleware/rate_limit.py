@@ -1,7 +1,7 @@
 """
-Implements "Within rate limit? -> No -> 429 + Retry-After" from the
-flowchart - the very first check a request hits, before auth or anything
-else runs.
+Rate limiting middleware: rejects a client with 429 + Retry-After once
+they've exceeded their request budget. This is the very first check any
+request hits, before auth or anything else in the app runs.
 
 Real token bucket, not a fixed-window counter: capacity refills
 continuously at a fixed rate rather than resetting in a lump at window
@@ -86,10 +86,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # rate budget or get rate-limited themselves.
             return await call_next(request)
 
-        # Keyed by client IP - once auth exists on a route (Day 3+), a
-        # per-user key would be more precise, but IP is the only thing
-        # available before authentication even runs, and this check has
-        # to happen first per the flowchart.
+        # Keyed by client IP rather than by authenticated user. A per-user
+        # key would be more precise (it wouldn't punish other people
+        # behind the same NAT/office IP), but rate limiting is the very
+        # first middleware to run - it happens before authentication has
+        # even parsed a token, so the user's identity simply isn't known
+        # yet. IP is the only identifier available at this point.
         client_ip = request.client.host if request.client else "unknown"
 
         is_sensitive = any(request.url.path.endswith(p) for p in self._SENSITIVE_PATHS)

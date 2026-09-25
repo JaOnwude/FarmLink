@@ -4,7 +4,7 @@ Contributions feature - business logic, called by router.py.
 A farmer contributing stock to a CLOSED pool must be rejected with 409 -
 this is one of the five must-pass tests from the brief ("Closed pool
 rejects orders and contributions with 409"). The lock pattern here is
-the same one Day 5's order placement uses on the same table: lock the
+the same locking pattern order placement uses on the same table: lock the
 pool row first, THEN check its status, so a contribution can't sneak in
 between an admin's close_pool check and its commit.
 """

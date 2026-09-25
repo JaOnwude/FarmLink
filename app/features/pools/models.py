@@ -3,7 +3,7 @@ Pools feature - SQLAlchemy ORM models.
 
 pools (product, price, total_qty, available_qty, status) - index(status)
 
-This is the row every order will SELECT ... FOR UPDATE in Day 5 - it's the
+This is the row every order locks with SELECT ... FOR UPDATE - it's the
 single source of truth for what's left to sell. available_qty is the
 number that must never go below zero; total_qty is fixed at pool creation
 (or grows as contributions come in - see contributions feature) and is

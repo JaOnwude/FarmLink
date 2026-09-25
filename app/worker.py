@@ -1,5 +1,5 @@
 """
-Entry point for the background job worker process (Day 10). Runs as its
+Entry point for the background job worker process. Runs as its
 OWN container (see docker-compose.yml's `worker` service) - a separate
 process from the API. This separation is the entire point: it's what
 lets an enqueued job survive an API restart. The API container can

@@ -4,7 +4,7 @@ Payments feature - SQLAlchemy ORM models.
 payments (order, amount, recorded_by, recorded_at)
 processed_events (event_id UNIQUE, reference, processed_at) - for the webhook
 
-processed_events is what makes the Day 9 Paystack webhook idempotent: the
+processed_events is what makes the Paystack webhook idempotent: the
 mock_payment_provider.py test script replays the same event_id to prove a
 retried webhook delivery only confirms a payment once. Every event Paystack
 sends is inserted here (event_id UNIQUE) before any business effect runs;

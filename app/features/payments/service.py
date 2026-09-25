@@ -2,10 +2,10 @@
 Payments feature - business logic, called by router.py.
 
 Two flows:
-  1. initialize_payment: buyer starts a payment for a PENDING order we
-     already created (Day 5). We call Paystack, hand back a URL/access
-     code for the client to complete payment - nothing in OUR database
-     changes yet. The order stays PENDING until...
+  1. initialize_payment: buyer starts a payment for a PENDING order that
+     already exists (created by the orders feature). We call Paystack,
+     hand back a URL/access code for the client to complete payment -
+     nothing in OUR database changes yet. The order stays PENDING until...
   2. process_webhook_event: Paystack tells us, asynchronously, that the
      charge succeeded. THIS is what actually marks an order PAID - never
      the client-side redirect after payment, which is easy to spoof or
@@ -16,11 +16,11 @@ webhook delivery, so every event is recorded in processed_events
 (event_id UNIQUE) in the SAME transaction as its business effect. If the
 insert fails on the unique constraint, we know this exact event has
 already been fully handled - rollback and return without redoing
-anything. This is deliberately the same pattern this project's Day 5
-order idempotency uses, and it's exactly what mock_payment_provider.py
-(the brief's test script) is built to verify: a duplicate event changes
-nothing, a forged signature never reaches this function at all, and an
-event for a reference we don't recognize is recorded but has no effect.
+anything. This mirrors the same idempotency-key pattern used for order
+creation in the orders feature, applied here to webhook events instead:
+a duplicate event changes nothing, a forged signature never reaches this
+function at all, and an event for a reference we don't recognize is
+recorded but has no further effect.
 """
 import json
 import uuid
@@ -121,12 +121,14 @@ async def process_webhook_event(db: AsyncSession, raw_body: bytes, signature: st
         await db.commit()
         return
 
+    # Locked with FOR UPDATE, not a plain SELECT: this closes the race
+    # against the background sweep job (see orders/service.py). Without
+    # this lock, a payment succeeding at the exact moment the sweep
+    # decides this same order is expired could interleave with the
+    # sweep's own lock-and-check - with the lock in place, whichever of
+    # the two locks the order row first wins outright, and the other one
+    # correctly sees the already-updated status when it re-checks.
     result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
-    # Locked, not a plain SELECT: closes the race with Day 9's sweep job.
-    # Without this lock, a payment succeeding at the exact moment the
-    # sweep decides this same order is expired could interleave with the
-    # sweep's own lock+check - whichever locks the order row first now
-    # wins outright, the other correctly sees the already-updated status.
     order = result.scalar_one_or_none()
     if order is None or order.status == OrderStatus.PAID:
         # Unknown reference, or already paid (a second success event for

@@ -1,5 +1,5 @@
 """
-RQ job queue setup - Day 10's real background-task mechanism.
+RQ job queue setup - the real background-task mechanism used by orders, payments, and the feed.
 
 Why a real queue instead of FastAPI's BackgroundTasks: BackgroundTasks
 runs inside the SAME process that served the request. If that process

@@ -6,7 +6,7 @@ Two writes, deliberately different urgency:
   1. Redis pub/sub (core.realtime) - awaited inline, right in the request
      path. This is what a connected SSE client actually sees, and it
      needs to be fast and immediate or "real-time" is a lie.
-  2. Firestore (firestore_client) - enqueued via Day 10's job queue, not
+  2. Firestore (firestore_client) - enqueued via the background job queue, not
      awaited inline. This is the durable record, and it can tolerate a
      few seconds of delay - it must NEVER add latency to placing an
      order or a contribution, and a slow/unreachable Firestore must
